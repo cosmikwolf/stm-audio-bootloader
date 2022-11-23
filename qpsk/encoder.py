@@ -42,11 +42,12 @@ class Scrambler(object):
     self._state = seed
     
   def scramble(self, data):
-    data = map(ord, data)
+    data = bytearray(data)
     for index, byte in enumerate(data):
-      data[index] = data[index] ^ (self._state >> 24)
-      self._state = (self._state * 1664525L + 1013904223L) & 0xffffffff
-    return ''.join(map(chr, data))
+      data[index] = byte ^ (self._state >> 24)
+      self._state = (self._state * 1664525 + 1013904223) & 0xffffffff
+    
+    return bytes(data)
 
 
 
@@ -75,7 +76,7 @@ class QpskEncoder(object):
     
   @staticmethod
   def _upsample(x, factor):
-    return numpy.tile(x.reshape(len(x), 1), (1, factor)).ravel()
+    return numpy.tile(x.reshape(len(x), 1), (1, int(factor))).ravel()
     
   def _encode_qpsk(self, symbol_stream):
     ratio = self._sr / self._br * 2
@@ -102,21 +103,21 @@ class QpskEncoder(object):
   def _code_packet(self, data):
     assert len(data) <= self._packet_size
     if len(data) != self._packet_size:
-      data = data + '\xff' * (self._packet_size - len(data))
+      data = data + b'\xff' * (self._packet_size - len(data))
     
     if self._scrambler:
       data = self._scrambler.scramble(data)
     
     crc = zlib.crc32(data) & 0xffffffff
 
-    data = map(ord, data)
+    # data = map(ord, data)
     # 16x 0 for the PLL ; 8x 21 for the edge detector ; 8x 3030 for syncing
     preamble = [0] * 8 + [0x99] * 4 + [0xcc] * 4
     crc_bytes = [crc >> 24, (crc >> 16) & 0xff, (crc >> 8) & 0xff, crc & 0xff]
-    bytes = preamble + data + crc_bytes
+    bbytes = bytes(preamble) + data + bytes(crc_bytes)
     
     symbol_stream = []
-    for byte in bytes:
+    for byte in bbytes:
       symbol_stream.append((byte >> 6) & 0x3)
       symbol_stream.append((byte >> 4) & 0x3)
       symbol_stream.append((byte >> 2) & 0x3)
@@ -134,7 +135,7 @@ class QpskEncoder(object):
   def code(self, data, page_size=1024, blank_duration=0.06):
     if len(data) % page_size != 0:
       tail = page_size - (len(data) % page_size)
-      data += '\xff' * tail
+      data += b'\xff' * tail
     
     offset = 0
     remaining_bytes = len(data)
@@ -246,7 +247,7 @@ def main():
       
   
   options, args = parser.parse_args()
-  data = file(args[0], 'rb').read()
+  data = open(args[0], 'rb').read()
   
   if len(args) != 1:
     logging.fatal('Specify one, and only one firmware .bin file!')
